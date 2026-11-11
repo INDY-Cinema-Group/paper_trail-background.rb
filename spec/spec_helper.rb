@@ -4,7 +4,7 @@ require "paper_trail-background"
 
 RSpec.configure do |let|
   # Exit the spec after the first failure
-  let.fail_fast = true
+  let.fail_fast = false
 
   # Only run a specific file, using the ENV variable
   # Example: FILE=spec/blankgem/version_spec.rb bundle exec rake spec
