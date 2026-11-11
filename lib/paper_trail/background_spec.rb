@@ -2,7 +2,9 @@
 
 require "spec_helper"
 
-WithData = Struct.new(:data)
+WithData = Struct.new(:data) do
+  def changed_notably? = true
+end
 WithVersionClass = Struct.new(:version_class)
 
 class SuperDummyClass
@@ -216,6 +218,74 @@ RSpec.describe PaperTrail::Background do
         DummyClass.new(options: { enabled: true }, record:).record_update_columns({})
 
         expect(VersionJob).to have_received(:perform_later)
+      end
+    end
+  end
+
+  describe "created_at" do
+    let(:record) { double("SomeRecord") }
+    let(:updated_at) { Time.utc(2020, 1, 1, 12, 0, 0) }
+    let(:now) { Time.utc(2024, 6, 1, 8, 0, 0) }
+    let(:options) { { async: true } }
+
+    before do
+      PaperTrail::Background::Config.configure { |config| config.opt_in = true }
+      allow(record).to receive_messages(paper_trail_options: options, new_record?: false, updated_at:)
+      allow(record.class).to receive(:paper_trail).and_return(WithVersionClass.new(Class))
+      allow(record.class).to receive(:after_transaction).and_yield
+      allow(Time).to receive(:current).and_return(now)
+    end
+
+    def written_data
+      attrs = nil
+      expect(VersionJob).to have_received(:perform_later) { |_klass, data, _event| attrs = data }
+      attrs
+    end
+
+    it "uses the record's updated_at on create" do
+      allow(PaperTrail::Events::Create).to receive(:new).and_return(WithData.new({}))
+      DummyClass.new(options: { enabled: true }, record:).record_create
+
+      expect(written_data[:created_at]).to eq(updated_at)
+    end
+
+    it "uses the record's updated_at on update" do
+      allow(PaperTrail::Events::Update).to receive(:new).and_return(WithData.new({}))
+      DummyClass.new(options: { enabled: true }, record:).record_update(force: true, in_after_callback: true, is_touch: false)
+
+      expect(written_data[:created_at]).to eq(updated_at)
+    end
+
+    it "uses the time of the change on destroy" do
+      allow(PaperTrail::Events::Destroy).to receive(:new).and_return(WithData.new({}))
+      DummyClass.new(options: { enabled: true }, record:).record_destroy("after")
+
+      expect(written_data[:created_at]).to eq(now)
+    end
+
+    it "uses the time of the change on update_columns" do
+      allow(PaperTrail::Events::Update).to receive(:new).and_return(WithData.new({}))
+      DummyClass.new(options: { enabled: true }, record:).record_update_columns({})
+
+      expect(written_data[:created_at]).to eq(now)
+    end
+
+    it "does not overwrite a created_at already present in the data" do
+      explicit = Time.utc(2019, 1, 1)
+      allow(PaperTrail::Events::Update).to receive(:new).and_return(WithData.new({ created_at: explicit }))
+      DummyClass.new(options: { enabled: true }, record:).record_update(force: true, in_after_callback: true, is_touch: false)
+
+      expect(written_data[:created_at]).to eq(explicit)
+    end
+
+    context "when synchronize_version_creation_timestamp is false" do
+      let(:options) { { async: true, synchronize_version_creation_timestamp: false } }
+
+      it "uses the time of the change instead of updated_at" do
+        allow(PaperTrail::Events::Update).to receive(:new).and_return(WithData.new({}))
+        DummyClass.new(options: { enabled: true }, record:).record_update(force: true, in_after_callback: true, is_touch: false)
+
+        expect(written_data[:created_at]).to eq(now)
       end
     end
   end

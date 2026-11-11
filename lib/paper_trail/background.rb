@@ -1,12 +1,15 @@
 # frozen_string_literal: true
 
 require "paper_trail/record_trail"
+require "paper_trail/record_history"
+require "paper_trail/version_concern"
 require "ar_after_transaction"
 
 module PaperTrail
   require_relative "background/config"
   require_relative "background/version"
   require_relative "background/job"
+  require_relative "background/ordering"
 
   module Background
     # @api private
@@ -23,7 +26,7 @@ module PaperTrail
       # `data_for_create` but PT-AT still does.
       data = event.data.merge(data_for_create)
 
-      trigger_write(@record, data, :create)
+      trigger_write(@record, with_created_at(data, use_updated_at: true), :create)
     end
 
     # `recording_order` is "after" or "before". See ModelConfig#on_destroy.
@@ -44,7 +47,7 @@ module PaperTrail
       # `data_for_destroy` but PT-AT still does.
       data = event.data.merge(data_for_destroy)
 
-      trigger_write(@record, data, :destroy)
+      trigger_write(@record, with_created_at(data), :destroy)
     end
 
     # @api private
@@ -62,7 +65,7 @@ module PaperTrail
       # `data_for_update_columns` but PT-AT still does.
       data = event.data.merge(data_for_update_columns)
 
-      trigger_write(@record, data, :update)
+      trigger_write(@record, with_created_at(data, use_updated_at: true), :update)
     end
 
     # @api private
@@ -72,15 +75,32 @@ module PaperTrail
       return unless enabled?
       return super if Config.configuration.opt_in && @record.paper_trail_options[:async].blank?
 
+      # `update_columns` skips dirty-tracking, so `changed_notably?` would
+      # always be false here. Like PaperTrail, record the explicit `changes`.
       event = Events::Update.new(@record, false, false, changes)
-
-      return unless force || event.changed_notably?
 
       # Merge data from `Event` with data from PT-AT. We no longer use
       # `data_for_update_columns` but PT-AT still does.
       data = event.data.merge(data_for_update_columns)
 
-      trigger_write(@record, data, :update)
+      trigger_write(@record, with_created_at(data), :update)
+    end
+
+    # The version is written by a background job, so without an explicit
+    # `created_at` it would be stamped with the time the job ran. Fix the
+    # timestamp now, when the change happened, so ordering by `created_at`
+    # reflects the order of changes and not the order of job execution.
+    #
+    # Mirrors PaperTrail: creates and updates use the record's `updated_at`
+    # (unless `synchronize_version_creation_timestamp: false`); everything
+    # else uses the current time.
+    private def with_created_at(data, use_updated_at: false)
+      return data if data[:created_at].present?
+
+      synchronize = @record.paper_trail_options[:synchronize_version_creation_timestamp] != false
+      timestamp = @record.updated_at if use_updated_at && synchronize && @record.respond_to?(:updated_at)
+
+      data.merge(created_at: timestamp || Time.current)
     end
 
     private def trigger_write(record, data, event)

@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+  - Versions now get `created_at` when the change happened (the record's `updated_at` for creates/updates, the current time otherwise) instead of when the background job ran, so ordering by `created_at` reflects change order
+  - Fixed `record_update_columns` referencing an undefined `force`. Like PaperTrail it no longer checks `changed_notably?`, since `update_columns` skips dirty-tracking, which previously meant no version was written (see #14)
+
 ## 1.2.0
 
   - When async is false we want to fall back to the original logic (#11 thanks @erf530)
