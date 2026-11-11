@@ -8,6 +8,7 @@ source "https://rubygems.org"
 gemspec
 
 gem "paper_trail", github: "INDY-Cinema-Group/paper_trail"
+gem "activerecord", "~> 7.2.3", ">= 7.2.3.2"
 
 # Declare any dependencies that are still in development here instead of in
 # your gemspec. These might include edge Rails or gems from your path or
